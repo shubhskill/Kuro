@@ -2,9 +2,12 @@
 import random
 
 
+
 def create_game():
-    """Create a new Number Combination game session."""
-    secret = "".join(str(random.randint(0, 9)) for _ in range(4))
+    """Create a new game with unique digits."""
+    secret = "".join(
+        random.sample("0123456789", 4)
+    )
 
     return {
         "secret": secret,
@@ -13,7 +16,6 @@ def create_game():
         "digits": 4,
         "max_attempts": 8,
     }
-
 
 def check_guess(game, guess):
     """Check a player's guess against the secret number."""
