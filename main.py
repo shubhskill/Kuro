@@ -11,7 +11,7 @@ MessageHandler,
 filters,
 )
 
-from games.number_game import create_game, check_guess
+from games.number_game import create_game
 
 logging.basicConfig(
 format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -53,22 +53,16 @@ return InlineKeyboardMarkup([
 
 def difficulty_keyboard():
 return InlineKeyboardMarkup([
-[
-InlineKeyboardButton("🟢 Easy (4 digits)", callback_data="number:start:4:10"),
-],
-[
-InlineKeyboardButton("🟡 Medium (5 digits)", callback_data="number:start:5:10"),
-],
-[
-InlineKeyboardButton("🔴 Hard (6 digits)", callback_data="number:start:6:12"),
-],
+[InlineKeyboardButton("🟢 Easy — 4 digits", callback_data="number:start:4:8")],
+[InlineKeyboardButton("🟡 Medium — 5 digits", callback_data="number:start:5:10")],
+[InlineKeyboardButton("🔴 Hard — 6 digits", callback_data="number:start:6:12")],
 [InlineKeyboardButton("🏠 Main Menu", callback_data="menu")],
 [InlineKeyboardButton("🚪 Logout", callback_data="logout")],
 ])
 
 def game_keyboard():
 return InlineKeyboardMarkup([
-[InlineKeyboardButton("🔄 New Game", callback_data="game:number")],
+[InlineKeyboardButton("🔄 Play Again", callback_data="game:number")],
 [InlineKeyboardButton("🏠 Main Menu", callback_data="menu")],
 [InlineKeyboardButton("🚪 Logout", callback_data="logout")],
 ])
@@ -105,99 +99,103 @@ text = (
 "Your temporary game session has been cleared.\n"
 "Account login is not enabled in this version."
 )
-if update.callback_query:
-await update.callback_query.edit_message_text(
-text=text, reply_markup=back_keyboard()
-)
-else:
-await update.effective_message.reply_text(
-text=text, reply_markup=back_keyboard()
-)
-
-async def begin_number_game(
-update: Update, context: ContextTypes.DEFAULT_TYPE, digits: int, attempts: int
-):
-game = create_game()
-game["secret"] = "".join(
-**import**("random").choice("0123456789") for _ in range(digits)
-)
-game["attempts_left"] = attempts
-game["max_attempts"] = attempts
-game["digits"] = digits
-game["finished"] = False
 
 ```
+if update.callback_query:
+    await update.callback_query.edit_message_text(
+        text=text, reply_markup=back_keyboard()
+    )
+else:
+    await update.effective_message.reply_text(
+        text=text, reply_markup=back_keyboard()
+    )
+```
+
+async def begin_number_game(
+update: Update,
+context: ContextTypes.DEFAULT_TYPE,
+digits: int,
+attempts: int,
+):
+import random
+
+```
+game = create_game()
+game["secret"] = "".join(random.choice("0123456789") for _ in range(digits))
+game["digits"] = digits
+game["attempts_left"] = attempts
+game["max_attempts"] = attempts
+game["finished"] = False
 context.user_data["number_game"] = game
 
+difficulty = {4: "EASY", 5: "MEDIUM", 6: "HARD"}[digits]
+
 await update.callback_query.edit_message_text(
-    f"🔢 NUMBER COMBINATION — {'EASY' if digits == 4 else 'MEDIUM' if digits == 5 else 'HARD'}\n\n"
+    f"🔢 NUMBER COMBINATION — {difficulty}\n\n"
     f"I've picked a secret {digits}-digit combination.\n"
     f"You have {attempts} attempts to crack it.\n\n"
-    "Send your guess as a message containing exactly "
-    f"{digits} digits.\n\n"
-    "💡 After each guess, you'll get hints.",
-    reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏠 Main Menu", callback_data="menu")],
-        [InlineKeyboardButton("🚪 Logout", callback_data="logout")],
-    ]),
+    f"Send your guess as a {digits}-digit message.\n"
+    "I'll tell you how many digits are in the correct position "
+    "and how many are in the combination.\n\n"
+    "⚠️ Leading zeroes are allowed.",
+    reply_markup=back_keyboard(),
 )
 ```
 
 async def handle_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
 game = context.user_data.get("number_game")
-if not game or game.get("finished"):
-return
 
 ```
+if not game or game.get("finished"):
+    return
+
 guess = (update.effective_message.text or "").strip()
 digits = game["digits"]
 
 if not guess.isdigit() or len(guess) != digits:
     await update.effective_message.reply_text(
-        f"Please enter exactly {digits} digits, for example: "
+        f"Please enter exactly {digits} digits. Example: "
         + ("1234" if digits == 4 else "12345" if digits == 5 else "123456")
     )
     return
 
-result = check_guess(game, guess)
+secret = game["secret"]
+correct_position = sum(a == b for a, b in zip(secret, guess))
+correct_digit = sum(
+    min(secret.count(digit), guess.count(digit))
+    for digit in set(guess)
+)
 
-# The game module validates four digits, so handle other difficulty lengths here.
-if result["status"] == "invalid":
-    secret = game["secret"]
-    correct_position = sum(a == b for a, b in zip(secret, guess))
-    correct_digit = sum(
-        min(secret.count(d), guess.count(d)) for d in set(guess)
-    )
-    game["attempts_left"] -= 1
+game["attempts_left"] -= 1
 
-    if guess == secret:
-        game["finished"] = True
-        result = {
-            "status": "won",
-            "message": "🎉 Correct! You cracked the combination!",
-        }
-    elif game["attempts_left"] <= 0:
-        game["finished"] = True
-        result = {
-            "status": "lost",
-            "message": f"❌ No attempts left! The secret was {secret}.",
-        }
-    else:
-        result = {
-            "status": "playing",
-            "message": (
-                f"🎯 Correct digits in correct positions: {correct_position}\n"
-                f"🔎 Correct digits in any position: {correct_digit}\n"
-                f"❤️ Attempts remaining: {game['attempts_left']}"
-            ),
-        }
-
-if result["status"] in ("won", "lost"):
+if guess == secret:
+    game["finished"] = True
+    used = game["max_attempts"] - game["attempts_left"]
     await update.effective_message.reply_text(
-        result["message"], reply_markup=game_keyboard()
+        "🎉 YOU CRACKED IT!\n\n"
+        f"Secret combination: {secret}\n"
+        f"Attempts used: {used}\n\n"
+        "Great job, player!",
+        reply_markup=game_keyboard(),
     )
-else:
-    await update.effective_message.reply_text(result["message"])
+    return
+
+if game["attempts_left"] <= 0:
+    game["finished"] = True
+    await update.effective_message.reply_text(
+        "❌ GAME OVER!\n\n"
+        f"The secret combination was: {secret}\n"
+        "Try again to beat the game.",
+        reply_markup=game_keyboard(),
+    )
+    return
+
+await update.effective_message.reply_text(
+    "🔎 HINT\n\n"
+    f"✅ Correct digits in the correct position: {correct_position}\n"
+    f"🔢 Correct digits in any position: {correct_digit}\n"
+    f"❤️ Attempts remaining: {game['attempts_left']}"
+)
 ```
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -225,7 +223,13 @@ if data == "game:number":
 if data.startswith("number:start:"):
     try:
         _, _, digits, attempts = data.split(":")
-        await begin_number_game(update, context, int(digits), int(attempts))
+        digits = int(digits)
+        attempts = int(attempts)
+
+        if digits not in (4, 5, 6):
+            raise ValueError("Unsupported difficulty")
+
+        await begin_number_game(update, context, digits, attempts)
     except (ValueError, IndexError):
         await query.edit_message_text(
             "Could not start that game.", reply_markup=back_keyboard()
@@ -235,6 +239,7 @@ if data.startswith("number:start:"):
 if data.startswith("game:"):
     game_id = data.split(":", 1)[1]
     game = GAMES.get(game_id)
+
     if game:
         await query.edit_message_text(
             f"{game[0]}\n\n{game[1]}\n\n"
@@ -249,14 +254,16 @@ if data.startswith("game:"):
 
 if data == "profile":
     await query.edit_message_text(
-        "👤 MY PROFILE\n\nProfiles will be connected when the database is configured.",
+        "👤 MY PROFILE\n\n"
+        "Profiles and statistics will be connected after database setup.",
         reply_markup=back_keyboard(),
     )
     return
 
 if data == "leaderboard":
     await query.edit_message_text(
-        "🏆 LEADERBOARD\n\nRankings will appear after scoring and database setup.",
+        "🏆 LEADERBOARD\n\n"
+        "Rankings will appear after database and scoring setup.",
         reply_markup=back_keyboard(),
     )
     return
@@ -276,20 +283,27 @@ BotCommand("logout", "Reset your temporary session"),
 logger.info("KURO bot commands registered.")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-logger.error("An error occurred while processing an update.", exc_info=context.error)
+logger.error(
+"An error occurred while processing an update.",
+exc_info=context.error,
+)
 
 def main():
 token = os.getenv("BOT_TOKEN")
-if not token:
-raise RuntimeError("BOT_TOKEN is missing. Add it to your hosting environment variables.")
 
 ```
+if not token:
+    raise RuntimeError(
+        "BOT_TOKEN is missing. Add it to your hosting environment variables."
+    )
+
 application = (
     Application.builder()
     .token(token)
     .post_init(post_init)
     .build()
 )
+
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("menu", menu_command))
 application.add_handler(CommandHandler("logout", logout))
